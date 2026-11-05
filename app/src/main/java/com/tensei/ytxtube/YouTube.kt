@@ -341,7 +341,8 @@ object YouTube {
     private fun handleFromChannelUrl(url: String): String? {
         val path = url.substringAfter("youtube.com", url).trimStart('/')
         if (!path.startsWith("@")) return null
-        return path.removePrefix("@").substringBefore('/').substringBefore('?').ifBlank { null }
+        val raw = path.removePrefix("@").substringBefore('/').substringBefore('?').ifBlank { null } ?: return null
+        return runCatching { java.net.URLDecoder.decode(raw, "UTF-8") }.getOrDefault(raw)
     }
 
     

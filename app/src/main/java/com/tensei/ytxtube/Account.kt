@@ -2169,24 +2169,54 @@ object InnerTube {
 
 
     internal fun parseViews(text: String?): Long {
-        val t = text?.lowercase()?.replace(",", "")?.trim() ?: return -1
-        if (t.startsWith("no ") || t.startsWith("कोई ") || t.startsWith("sin ")) return 0
-        if ("करोड़" in t || "cr" in t) {
-            val num = Regex("([\\d.]+)").find(t)?.groupValues?.get(1)?.toDoubleOrNull() ?: return -1
+        if (text.isNullOrBlank()) return -1L
+        var t = text.replace('\u00A0', ' ').replace(',', "").trim().lowercase()
+        val easternDigits = "٠١٢٣٤٥٦٧٨٩"
+        easternDigits.forEachIndexed { idx, char ->
+            t = t.replace(char.toString(), idx.toString())
+        }
+        if (t.startsWith("no ") || t.startsWith("لا ") || t.startsWith("कोई ") || t.startsWith("sin ")) return 0L
+
+        // Indian numbering system (with word boundaries to avoid matching "subscribers")
+        if ("करोड़" in t || Regex("""\bcr\b|\bcrore\b""").containsMatchIn(t)) {
+            val num = Regex("""([\d.]+)""").find(t)?.groupValues?.get(1)?.toDoubleOrNull() ?: return -1L
             return (num * 10_000_000).toLong()
         }
-        if ("लाख" in t || "lakh" in t) {
-            val num = Regex("([\\d.]+)").find(t)?.groupValues?.get(1)?.toDoubleOrNull() ?: return -1
+        if ("लाख" in t || Regex("""\blakh\b""").containsMatchIn(t)) {
+            val num = Regex("""([\d.]+)""").find(t)?.groupValues?.get(1)?.toDoubleOrNull() ?: return -1L
             return (num * 100_000).toLong()
         }
         if ("हज़ार" in t) {
-            val num = Regex("([\\d.]+)").find(t)?.groupValues?.get(1)?.toDoubleOrNull() ?: return -1
+            val num = Regex("""([\d.]+)""").find(t)?.groupValues?.get(1)?.toDoubleOrNull() ?: return -1L
             return (num * 1_000).toLong()
         }
-        val m = Regex("([\\d.]+)\\s*([kmb]?)").find(t) ?: return -1
-        val n = m.groupValues[1].toDoubleOrNull() ?: return -1
-        val mult = when (m.groupValues[2]) { "k" -> 1e3; "m" -> 1e6; "b" -> 1e9; else -> 1.0 }
+
+        val numMatch = Regex("""([\d.]+)""").find(t) ?: return -1L
+        val n = numMatch.groupValues[1].toDoubleOrNull() ?: return -1L
+
+        val mult = when {
+            anyWord(t, "مليار", "billion", "млрд", "mrd") -> 1e9
+            anyWord(t, "مليون", "million", "млн", "mio", "jt") -> 1e6
+            anyWord(t, "ألف", "الف", "thousand", "тыс", "tsd", "rb", "mil") -> 1e3
+            else -> {
+                val suff = Regex("""[\d.]+\s*([kmb])(?:\b|[^\p{L}])""").find(t)
+                when (suff?.groupValues?.get(1)) {
+                    "b" -> 1e9
+                    "m" -> 1e6
+                    "k" -> 1e3
+                    else -> 1.0
+                }
+            }
+        }
         return (n * mult).toLong()
+    }
+
+    private fun anyWord(text: String, vararg words: String): Boolean =
+        words.any { it in text }
+
+    private fun decodeHandle(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        return runCatching { java.net.URLDecoder.decode(raw.trim(), "UTF-8") }.getOrDefault(raw.trim()).ifBlank { null }
     }
 
     private fun absoluteUrl(url: String) = if (url.startsWith("//")) "https:$url" else url
@@ -2195,21 +2225,45 @@ object InnerTube {
         var handle: String? = null
         var subsText: String? = null
         var videosText: String? = null
+        var exactSubs: Long = -1L
+
+        fun isSubscriberLine(s: String): Boolean {
+            val l = s.lowercase()
+            return "subscriber" in l || "مشترك" in l || "متابع" in l || "اشتراك" in l ||
+                   "abonn" in l || "suscriptor" in l || "подписчик" in l || "inscrito" in l ||
+                   "abone" in l || "langganan" in l || "người đăng ký" in l || "位订阅者" in l ||
+                   "人の登録者" in l || "구독자" in l || "सदस्य" in l
+        }
+
+        fun isVideoCountLine(s: String): Boolean {
+            val l = s.lowercase()
+            return "video" in l || "فيديو" in l || "مقاطع" in l || "vidéo" in l || "vídeo" in l ||
+                   "видео" in l || "videolar" in l || "वीडियो" in l || "视频" in l || "동영상" in l
+        }
+
         fun noteLine(line: String?) {
             val t = line?.trim()?.ifBlank { null } ?: return
             val lower = t.lowercase()
-            if (subsText == null && "subscriber" in lower) subsText = t
-            if (videosText == null) {
-                VIDEO_COUNT_IN_LINE.find(lower)?.value?.let { videosText = it }
+            if (subsText == null && isSubscriberLine(lower)) subsText = t
+            if (videosText == null && isVideoCountLine(lower)) {
+                VIDEO_COUNT_IN_LINE.find(lower)?.value?.let { videosText = it } ?: run {
+                    if (Regex("""\d""").containsMatchIn(lower)) videosText = t
+                }
             }
         }
         fun scanMetadataParts(arr: JSONArray?) {
             if (arr == null) return
             for (i in 0 until arr.length()) {
-                noteLine(arr.optJSONObject(i)?.optJSONObject("text")?.optString("content"))
+                val item = arr.optJSONObject(i)
+                noteLine(item?.optJSONObject("text")?.optString("content"))
+                noteLine(item?.optString("accessibilityLabel"))
             }
         }
         root.walk { _, obj ->
+            val countStr = obj.optString("userInteractionCount")
+            if (countStr.isNotBlank() && exactSubs < 0) {
+                exactSubs = countStr.toLongOrNull() ?: -1L
+            }
             noteLine(obj.text("subscriberCountText"))
             noteLine(obj.text("videoCountText"))
             noteLine(obj.optJSONObject("text")?.optString("content"))
@@ -2220,10 +2274,12 @@ object InnerTube {
                 }
             }
             obj.optString("vanityChannelUrl").takeIf { "@" in it }?.let { url ->
-                handle = handle ?: url.substringAfter("@").substringBefore("?").substringBefore("/").ifBlank { null }
+                val raw = url.substringAfter("@").substringBefore("?").substringBefore("/")
+                decodeHandle(raw)?.let { handle = handle ?: it }
             }
             obj.optString("canonicalBaseUrl").takeIf { it.startsWith("/@") }?.let { path ->
-                handle = handle ?: path.removePrefix("/@").substringBefore("/").ifBlank { null }
+                val raw = path.removePrefix("/@").substringBefore("/")
+                decodeHandle(raw)?.let { handle = handle ?: it }
             }
         }
         if (subsText == null || videosText == null) {
@@ -2231,7 +2287,7 @@ object InnerTube {
                 noteLine(line)
             }
         }
-        val subscribers = parseViews(subsText)
+        val subscribers = if (exactSubs > 0) exactSubs else parseViews(subsText)
         val videoCount = parseViews(videosText)
         val verified = root.optJSONObject("header")?.let { parseChannelVerified(it) } ?: false
         if (handle == null && subscribers < 0 && videoCount < 0 && !verified) return null

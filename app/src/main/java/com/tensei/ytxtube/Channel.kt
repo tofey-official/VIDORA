@@ -346,7 +346,8 @@ fun ChannelScreen(
                             Spacer(Modifier.width(14.dp))
                             Column(Modifier.weight(1f)) {
                                 ChannelNameWithBadge(d.name, verified = d.verified, maxLines = 2)
-                                d.handle?.let { handle ->
+                                d.handle?.let { rawHandle ->
+                                    val handle = runCatching { java.net.URLDecoder.decode(rawHandle, "UTF-8") }.getOrDefault(rawHandle)
                                     Spacer(Modifier.height(2.dp))
                                     Text("@$handle", color = c.onSurfaceVariant, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }

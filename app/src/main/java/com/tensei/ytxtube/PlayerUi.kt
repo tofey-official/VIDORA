@@ -1986,7 +1986,7 @@ private fun VideoDetailsBlock(
                 Column(Modifier.weight(1f)) {
                     Text(item.channel, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     details?.subscribers?.takeIf { it > 0 }?.let {
-                        Text("${formatCount(it)} subscribers", color = c.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("${formatCount(it)} ${I18n.t("subscribers", "subscribers")}", color = c.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
