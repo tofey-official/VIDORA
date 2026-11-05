@@ -96,10 +96,10 @@ object MirnahAuth {
         return when {
             entries == null ->
                 MirnahLoginResult.Failure("تعذّر الاتصال بالخادم، تأكد من الإنترنت وحاول مجدداً")
-            entries is MirnahCodes.Bad ->
+            entries is MirnahCodes.Fetch.Bad ->
                 MirnahLoginResult.Failure("ملف الأكواد على الخادم غير صالح أو مشفّر، راجع مدير اللوحة")
             else -> {
-                val entry = (entries as MirnahCodes.Ok).list
+                val entry = (entries as MirnahCodes.Fetch.Ok).list
                     .firstOrNull { it.optString("code", "").trim().equals(code, ignoreCase = true) }
                     ?: return MirnahLoginResult.Failure("الكود غير صحيح، تأكد من الكود وحاول مجدداً")
 
