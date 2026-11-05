@@ -75,6 +75,7 @@ import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Subscriptions
 import androidx.compose.material.icons.outlined.VideoLibrary
+import androidx.compose.material.icons.outlined.LiveTv
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.MusicNote
@@ -82,6 +83,7 @@ import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Subscriptions
 import androidx.compose.material.icons.rounded.VideoLibrary
+import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -238,7 +240,7 @@ enum class Tab(val defaultLabel: String, val icon: ImageVector, val selectedIcon
     Music("Music", Icons.Outlined.MusicNote, Icons.Rounded.MusicNote),
     Shorts("Shorts", Icons.Outlined.PlayCircle, Icons.Rounded.PlayCircle),
     Library("Library", Icons.Outlined.VideoLibrary, Icons.Rounded.VideoLibrary),
-    Downloads("Saved", Icons.Outlined.Download, Icons.Rounded.Download);
+    Downloads("مرناة", Icons.Outlined.LiveTv, Icons.Rounded.LiveTv);
 
     val label: String
         get() = when (this) {

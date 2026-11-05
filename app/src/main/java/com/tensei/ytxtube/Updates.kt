@@ -92,7 +92,7 @@ internal val RELEASE_NOTES = """
     • Added landscape video gestures switch: Easily turn on or off volume (right edge) and brightness (left edge) vertical swipes in Settings.
     • Adaptive stream quality: Auto resolution adapts to your measured connection speed to prevent buffering on videos and Shorts.
     • Reorganized Settings: Appearance & Theme followed by General with corrected switch text layouts.
-    • Replaced header mark with the official YTXTube app icon.
+    • Replaced header mark with the official VIDORA app icon.
 """.trimIndent()
 
 /**
@@ -171,7 +171,7 @@ class UpdateState(private val scope: CoroutineScope) {
     fun install(context: Context) {
         val file = downloaded ?: return
         if (Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls()) {
-            error = "Allow installs from YTXTube, then tap Install again."
+            error = "Allow installs from VIDORA, then tap Install again."
             runCatching {
                 context.startActivity(
                     Intent(
@@ -379,7 +379,7 @@ fun UpdateOverlay(state: UpdateState, backdrop: Backdrop) {
                                 fontWeight = FontWeight.Bold,
                             )
                             Text(
-                                "YTXTube ${update?.version.orEmpty()}" +
+                                "VIDORA ${update?.version.orEmpty()}" +
                                     formatUpdateSize(update?.sizeBytes ?: 0L).let { if (it.isBlank()) "" else " · $it" },
                                 color = c.onSurfaceVariant,
                                 fontSize = 12.5.sp,

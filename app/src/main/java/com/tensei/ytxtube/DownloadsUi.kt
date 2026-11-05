@@ -234,7 +234,7 @@ fun DownloadsScreen(
     val shown = if (section == 0) videos else music
     CollapsingHeaderLayout(
         resetKey = scrollToTop to listOf(tasks.size, tasks.count { it.status == DownloadStatus.Complete }),
-        header = { ScreenHeader(title = "Downloads") { HeaderActions(onSearch, onAccount) } },
+        header = { ScreenHeader(title = I18n.t("tab_downloads", "مرناة")) { HeaderActions(onSearch, onAccount) } },
     ) { top ->
         LazyColumn(contentPadding = contentPadding.withTop(top)) {
             item(key = "sections") {

@@ -1261,7 +1261,7 @@ object I18n {
             "tab_music" to "الموسيقى",
             "tab_shorts" to "Shorts",
             "tab_library" to "المكتبة",
-            "tab_downloads" to "المحفوظات",
+            "tab_downloads" to "مرناة",
             "settings" to "الإعدادات",
             "subscriptions" to "الاشتراكات",
             "history" to "السجل",

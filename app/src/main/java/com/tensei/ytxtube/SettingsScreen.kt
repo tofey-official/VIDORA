@@ -217,7 +217,7 @@ fun SettingsScreen(
                     SettingsRow(
                         icon = Icons.Rounded.DataUsage,
                         title = I18n.t("storage_usage", "Storage Usage"),
-                        subtitle = I18n.t("storage_sub", "See phone storage & clear YTXTube cache"),
+                        subtitle = I18n.t("storage_sub", "See phone storage & clear VIDORA cache"),
                         onClick = { activeFloatingSection = SettingsFloatingSection.STORAGE_USAGE },
                     )
                 }
@@ -227,7 +227,7 @@ fun SettingsScreen(
                     SettingsRow(
                         icon = Icons.Rounded.Info,
                         title = I18n.t("version", "Version"),
-                        subtitle = "YTXTube ${BuildConfig.VERSION_NAME}",
+                        subtitle = "VIDORA ${BuildConfig.VERSION_NAME}",
                         trailing = {
                             Box(
                                 modifier = Modifier
@@ -277,7 +277,7 @@ fun SettingsScreen(
                             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                         }
                     }
-                    val ytxRepo = "https://github.com/Koustubh12345/YTXTube"
+                    val ytxRepo = "https://github.com/tofey-official/VIDORA"
                     SettingsRow(
                         icon = Icons.Rounded.Code,
                         title = I18n.t("open_source", "Open Source"),
@@ -339,7 +339,7 @@ fun SettingsScreen(
                 SettingsFloatingSection.STORAGE_USAGE -> {
                     SettingsFloatingDialog(
                         title = I18n.t("storage_usage", "Storage Usage"),
-                        subtitle = I18n.t("storage_sub", "Device memory & YTXTube data"),
+                        subtitle = I18n.t("storage_sub", "Device memory & VIDORA data"),
                         onDismiss = { activeFloatingSection = null },
                     ) {
                         StorageUsageContent(context = context) {
@@ -1153,7 +1153,7 @@ private fun DownloadFolderSelectionDialog(
                     Spacer(Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Download/YTXTube Downloads",
+                            text = "Download/VIDORA Downloads",
                             fontWeight = if (isDefault) FontWeight.SemiBold else FontWeight.Medium,
                             fontSize = 13.sp,
                             color = if (isDefault) c.primary else c.onSurface,
@@ -1171,7 +1171,7 @@ private fun DownloadFolderSelectionDialog(
 
                 Spacer(Modifier.height(6.dp))
 
-                val musicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "YTXTube").absolutePath
+                val musicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "VIDORA").absolutePath
                 val isMusic = currentPath == musicDir
                 Row(
                     modifier = Modifier
@@ -1191,7 +1191,7 @@ private fun DownloadFolderSelectionDialog(
                     Spacer(Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Music/YTXTube",
+                            text = "Music/VIDORA",
                             fontWeight = if (isMusic) FontWeight.SemiBold else FontWeight.Medium,
                             fontSize = 13.sp,
                             color = if (isMusic) c.primary else c.onSurface,
@@ -1277,7 +1277,7 @@ private fun GeneralModificationContent(context: Context) {
             val path = if (docId.startsWith("primary:")) {
                 File(Environment.getExternalStorageDirectory(), docId.removePrefix("primary:"))
             } else {
-                File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "YTXTube Downloads")
+                File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "VIDORA Downloads")
             }
             Downloads.setCustomDownloadDir(path)
         }
@@ -1473,7 +1473,7 @@ private fun GeneralModificationContent(context: Context) {
                 showFolderDialog = false
             },
             onSelectMusic = {
-                val musicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "YTXTube")
+                val musicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "VIDORA")
                 Downloads.setCustomDownloadDir(musicDir)
                 showFolderDialog = false
             },
@@ -1662,7 +1662,7 @@ private fun StorageUsageContent(context: Context, onCacheCleared: () -> Unit) {
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = I18n.t("used_by_ytxtube", "Used by YTXTube"),
+                text = I18n.t("used_by_vidora", "Used by VIDORA"),
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 14.sp,
                 color = c.onSurface,
@@ -1740,7 +1740,7 @@ private fun StorageUsageContent(context: Context, onCacheCleared: () -> Unit) {
                 }
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    text = clearedNotice ?: I18n.t("clear_cache_downloads", "Clear YTXTube Cache & Downloads"),
+                    text = clearedNotice ?: I18n.t("clear_cache_downloads", "Clear VIDORA Cache & Downloads"),
                     color = Color(0xFFEF5350),
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 12.5.sp,

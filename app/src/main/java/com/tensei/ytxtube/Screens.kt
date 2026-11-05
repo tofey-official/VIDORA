@@ -215,7 +215,7 @@ fun HomeScreen(
         resetKey = scrollToTop to (lib.home.generation to activeFilter),
         header = {
             Column(Modifier.fillMaxWidth()) {
-                ScreenHeader(title = "YTXTube", brandMark = true) { HeaderActions(onSearch, onAccount) }
+                ScreenHeader(title = "VIDORA", brandMark = true) { HeaderActions(onSearch, onAccount) }
                 HomeFilterChips(selected = activeFilter, onSelect = { activeFilter = it })
             }
         },
@@ -693,7 +693,7 @@ fun LibraryScreen(
             item(key = "playlistsTitle") { SectionTitle("Playlists") }
             val pinned = listOf(
                 PlaylistRef("WL", "Watch later", null, null),
-                PlaylistRef("MDL", "YTX Music Downloads", null, null),
+                PlaylistRef("MDL", "VIDORA Music Downloads", null, null),
                 PlaylistRef("LL", "Liked videos", null, null),
             )
             items((pinned + lib.playlists).chunked(2), key = { row -> row.joinToString { it.id } }) { row ->
