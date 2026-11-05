@@ -2170,7 +2170,7 @@ object InnerTube {
 
     internal fun parseViews(text: String?): Long {
         if (text.isNullOrBlank()) return -1L
-        var t = text.replace('\u00A0', ' ').replace(',', "").trim().lowercase()
+        var t = text.replace("\u00A0", " ").replace(",", "").trim().lowercase()
         val easternDigits = "٠١٢٣٤٥٦٧٨٩"
         easternDigits.forEachIndexed { idx, char ->
             t = t.replace(char.toString(), idx.toString())
