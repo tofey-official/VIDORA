@@ -151,7 +151,7 @@ object Downloads {
 
     fun defaultDownloadDir(): File {
         val pubDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        return File(pubDownloads, "YTXTube Downloads")
+        return File(pubDownloads, "VIDORA Downloads")
     }
 
     fun init(context: Context) {

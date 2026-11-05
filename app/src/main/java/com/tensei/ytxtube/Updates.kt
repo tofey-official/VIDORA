@@ -201,9 +201,9 @@ class UpdateState(private val scope: CoroutineScope) {
 
     private fun fetchLatest(): UpdateInfo? {
         val request = Request.Builder()
-            .url("https://api.github.com/repos/Koustubh12345/YTXTube/releases/latest")
+            .url("https://api.github.com/repos/tofey-official/VIDORA/releases/latest")
             .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "YTXTube/${BuildConfig.VERSION_NAME}")
+            .header("User-Agent", "VIDORA/${BuildConfig.VERSION_NAME}")
             .build()
         Net.client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return null
@@ -220,11 +220,11 @@ class UpdateState(private val scope: CoroutineScope) {
                 if (!name.endsWith(".apk", ignoreCase = true)) continue
                 val candidate = asset.optString("browser_download_url")
                 if (candidate.isBlank()) continue
-                if (apkUrl == null || name.equals("YTXTube.apk", ignoreCase = true)) {
+                if (apkUrl == null || name.equals("VIDORA.apk", ignoreCase = true) || name.equals("YTXTube.apk", ignoreCase = true)) {
                     apkUrl = candidate
                     size = asset.optLong("size")
                 }
-                if (name.equals("YTXTube.apk", ignoreCase = true)) break
+                if (name.equals("VIDORA.apk", ignoreCase = true)) break
             }
             val url = apkUrl ?: return null
             return UpdateInfo(
@@ -243,11 +243,11 @@ class UpdateState(private val scope: CoroutineScope) {
         onProgress: (Float) -> Unit,
     ): File {
         val dir = File(context.cacheDir, "updates").apply { mkdirs() }
-        val target = File(dir, "YTXTube.apk")
+        val target = File(dir, "VIDORA.apk")
         if (target.exists()) target.delete()
         val request = Request.Builder()
             .url(update.apkUrl)
-            .header("User-Agent", "YTXTube/${BuildConfig.VERSION_NAME}")
+            .header("User-Agent", "VIDORA/${BuildConfig.VERSION_NAME}")
             .build()
         Net.client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) error("HTTP ${response.code}")
@@ -446,7 +446,7 @@ fun UpdateOverlay(state: UpdateState, backdrop: Backdrop) {
                         )
                         Spacer(Modifier.height(7.dp))
                         Text(
-                            "${(state.progress * 100).toInt()}% · downloading YTXTube.apk",
+                            "${(state.progress * 100).toInt()}% · downloading VIDORA.apk",
                             color = c.onSurfaceVariant,
                             fontSize = 11.5.sp,
                             fontWeight = FontWeight.Medium,

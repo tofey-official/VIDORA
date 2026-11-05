@@ -944,7 +944,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (donateNowBtn) {
     donateNowBtn.onclick = () => {
-      window.location.href = 'upi://pay?pa=koustubhgaikwad7-1@okaxis&pn=YTXTube%20Support&cu=INR';
+      window.location.href = 'upi://pay?pa=koustubhgaikwad7-1@okaxis&pn=VIDORA%20Support&cu=INR';
     };
   }
 
@@ -953,7 +953,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     shareBtn.onclick = () => {
       if (!currentVideoId) return;
       const titleEl = document.getElementById('watch-title');
-      const title = titleEl ? titleEl.textContent : 'YTXTube Video';
+      const title = titleEl ? titleEl.textContent : 'VIDORA Video';
       const url = `https://www.youtube.com/watch?v=${currentVideoId}`;
       
       if (navigator.share) {
