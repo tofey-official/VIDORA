@@ -175,7 +175,9 @@ class PlaybackService : MediaSessionService() {
             mediaItems: MutableList<MediaItem>,
         ): ListenableFuture<MutableList<MediaItem>> = resolver.submit<MutableList<MediaItem>> {
             mediaItems.map { item ->
-                val local = item.requestMetadata.mediaUri?.takeIf { it.scheme == "file" }
+                // Xtream/مرناة items carry a direct http(s) mediaUri in requestMetadata;
+                // only fall back to YouTube resolution when there is no direct URL.
+                val local = item.requestMetadata.mediaUri
                     ?: item.mediaMetadata.extras?.getString("local_uri")?.let(Uri::parse)
                 if (local != null) {
 
@@ -237,6 +239,9 @@ private class StreamRecoverer(
         if (error.errorCode != PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS) return
         val item = player.currentMediaItem ?: return
 
+        // Direct Xtream/مرناة URLs are re-fetched as-is by ExoPlayer's loader;
+        // YouTube re-extraction cannot fix them, so don't try.
+        if (item.requestMetadata.mediaUri != null) return
         if (item.localConfiguration?.uri?.scheme == "file") return
         val id = item.mediaId
         val position = player.currentPosition

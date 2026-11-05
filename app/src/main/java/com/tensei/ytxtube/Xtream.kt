@@ -83,8 +83,9 @@ class XtreamClient(private val dns: String, private val username: String, privat
     suspend fun vodCategories(): List<XtCategory> = categories("get_vod_categories")
     suspend fun seriesCategories(): List<XtCategory> = categories("get_series_categories")
 
-    suspend fun liveStreams(): List<XtLive> = withContext(Dispatchers.IO) {
-        val arr = arrayGet("get_live_streams")
+    /** Channels of one category (category_id filter) — avoids multi-MB full dumps. */
+    suspend fun liveStreams(categoryId: String?): List<XtLive> = withContext(Dispatchers.IO) {
+        val arr = arrayGet("get_live_streams", categoryId?.takeIf { it.isNotBlank() }?.let { mapOf("category_id" to it) } ?: emptyMap())
         (0 until arr.length()).mapNotNull { i ->
             val o = arr.optJSONObject(i) ?: return@mapNotNull null
             val id = o.optString("stream_id")
@@ -97,8 +98,9 @@ class XtreamClient(private val dns: String, private val username: String, privat
         }
     }
 
-    suspend fun vodStreams(): List<XtMovie> = withContext(Dispatchers.IO) {
-        val arr = arrayGet("get_vod_streams")
+    /** Movies of one category (category_id filter) — avoids multi-MB full dumps. */
+    suspend fun vodStreams(categoryId: String?): List<XtMovie> = withContext(Dispatchers.IO) {
+        val arr = arrayGet("get_vod_streams", categoryId?.takeIf { it.isNotBlank() }?.let { mapOf("category_id" to it) } ?: emptyMap())
         (0 until arr.length()).mapNotNull { i ->
             val o = arr.optJSONObject(i) ?: return@mapNotNull null
             val id = o.optString("stream_id")
@@ -114,8 +116,9 @@ class XtreamClient(private val dns: String, private val username: String, privat
         }
     }
 
-    suspend fun series(): List<XtSeries> = withContext(Dispatchers.IO) {
-        val arr = arrayGet("get_series")
+    /** Series of one category (category_id filter) — avoids multi-MB full dumps. */
+    suspend fun series(categoryId: String?): List<XtSeries> = withContext(Dispatchers.IO) {
+        val arr = arrayGet("get_series", categoryId?.takeIf { it.isNotBlank() }?.let { mapOf("category_id" to it) } ?: emptyMap())
         (0 until arr.length()).mapNotNull { i ->
             val o = arr.optJSONObject(i) ?: return@mapNotNull null
             val id = o.optString("series_id")

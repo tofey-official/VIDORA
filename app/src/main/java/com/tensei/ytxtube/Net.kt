@@ -22,7 +22,7 @@ object Net {
         OkHttpClient.Builder()
             .dispatcher(dispatcher)
             .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(90, TimeUnit.SECONDS)
             .connectionPool(okhttp3.ConnectionPool(32, 5, TimeUnit.MINUTES))
             .build()
     }

@@ -444,12 +444,12 @@ private sealed interface MirnahContentState {
     object Loading : MirnahContentState
     data class Error(val message: String) : MirnahContentState
     data class Ready(
-        val movies: List<XtMovie>,
-        val series: List<XtSeries>,
-        val live: List<XtLive>,
         val vodCats: List<XtCategory>,
         val serCats: List<XtCategory>,
         val liveCats: List<XtCategory>,
+        val movies: Map<String, List<XtMovie>> = emptyMap(),
+        val series: Map<String, List<XtSeries>> = emptyMap(),
+        val live: Map<String, List<XtLive>> = emptyMap(),
     ) : MirnahContentState
 }
 
@@ -490,33 +490,71 @@ private fun MirnahContent(
 
     var state by remember { mutableStateOf<MirnahContentState>(MirnahContentState.Loading) }
     var episodesState by remember { mutableStateOf<MirnahEpisodesState>(MirnahEpisodesState.Idle) }
+    var catLoading by remember { mutableStateOf(false) }
 
+    // Phase 1 — categories only (a few KB each) so the screen appears fast.
+    // Full stream dumps are 25MB+ (77K movies) and stalled loading forever.
     LaunchedEffect(session.dns, session.username, reloadKey) {
         state = MirnahContentState.Loading
         openSeries = null
+        vodCat = null
+        serCat = null
+        liveCat = null
         val result = runCatching {
             xt.checkAuth()
             coroutineScope {
                 val vodCatsD = async { xt.vodCategories() }
                 val serCatsD = async { xt.seriesCategories() }
                 val liveCatsD = async { xt.liveCategories() }
-                val moviesD = async { xt.vodStreams() }
-                val seriesD = async { xt.series() }
-                val liveD = async { xt.liveStreams() }
                 MirnahContentState.Ready(
-                    movies = moviesD.await(),
-                    series = seriesD.await(),
-                    live = liveD.await(),
                     vodCats = vodCatsD.await(),
                     serCats = serCatsD.await(),
                     liveCats = liveCatsD.await(),
                 )
             }
         }
-        state = result.fold(
-            onSuccess = { it },
-            onFailure = { MirnahContentState.Error(friendlyXtreamError(it)) },
+        result.fold(
+            onSuccess = { ready ->
+                // Open on the first category instead of a full "الكل" dump.
+                vodCat = ready.vodCats.firstOrNull()?.id
+                serCat = ready.serCats.firstOrNull()?.id
+                liveCat = ready.liveCats.firstOrNull()?.id
+                state = ready
+            },
+            onFailure = { state = MirnahContentState.Error(friendlyXtreamError(it)) },
         )
+    }
+
+    // Phase 2 — fetch the selected category's items on demand (tens of KB),
+    // then cache them in memory for instant switching.
+    LaunchedEffect(state, selectedTab, kind, vodCat, serCat, liveCat) {
+        val ready = state as? MirnahContentState.Ready ?: return@LaunchedEffect
+        val target = when (selectedTab) {
+            0 -> if (kind == 0) vodCat else serCat
+            else -> liveCat
+        } ?: return@LaunchedEffect
+        val cached = when (selectedTab) {
+            0 -> if (kind == 0) ready.movies.containsKey(target) else ready.series.containsKey(target)
+            else -> ready.live.containsKey(target)
+        }
+        if (cached) return@LaunchedEffect
+        catLoading = true
+        runCatching {
+            when (selectedTab) {
+                0 -> if (kind == 0) {
+                    val list = xt.vodStreams(target)
+                    state = ready.copy(movies = ready.movies + (target to list))
+                } else {
+                    val list = xt.series(target)
+                    state = ready.copy(series = ready.series + (target to list))
+                }
+                else -> {
+                    val list = xt.liveStreams(target)
+                    state = ready.copy(live = ready.live + (target to list))
+                }
+            }
+        }.onFailure { state = MirnahContentState.Error(friendlyXtreamError(it)) }
+        catLoading = false
     }
 
     LaunchedEffect(openSeries?.id, episodesRetry) {
@@ -538,15 +576,15 @@ private fun MirnahContent(
 
     val filteredMovies = remember(state, vodCat) {
         val r = state as? MirnahContentState.Ready ?: return@remember emptyList<XtMovie>()
-        if (vodCat == null) r.movies else r.movies.filter { it.categoryId == vodCat }
+        vodCat?.let { r.movies[it] } ?: emptyList()
     }
     val filteredSeries = remember(state, serCat) {
         val r = state as? MirnahContentState.Ready ?: return@remember emptyList<XtSeries>()
-        if (serCat == null) r.series else r.series.filter { it.categoryId == serCat }
+        serCat?.let { r.series[it] } ?: emptyList()
     }
     val filteredLive = remember(state, liveCat) {
         val r = state as? MirnahContentState.Ready ?: return@remember emptyList<XtLive>()
-        if (liveCat == null) r.live else r.live.filter { it.categoryId == liveCat }
+        liveCat?.let { r.live[it] } ?: emptyList()
     }
 
     // Chip rows per tab
@@ -557,11 +595,11 @@ private fun MirnahContent(
                 MirnahChip("kind:1", "مسلسلات", isKind = true, active = kind == 1),
             )
             val cats = (if (kind == 0) ready?.vodCats else ready?.serCats).orEmpty()
-            kindChips + MirnahChip("cat:null", "الكل") + cats.map { MirnahChip("cat:${it.id}", it.name) }
+            kindChips + cats.map { MirnahChip("cat:${it.id}", it.name) }
         }
         else -> {
             val cats = ready?.liveCats.orEmpty()
-            listOf(MirnahChip("cat:null", "الكل")) + cats.map { MirnahChip("cat:${it.id}", it.name) }
+            cats.map { MirnahChip("cat:${it.id}", it.name) }
         }
     }
     val selectedChipKey = when (selectedTab) {
@@ -656,10 +694,11 @@ private fun MirnahContent(
                         }
                     }
                 }
-                state is MirnahContentState.Loading -> item(key = "loading") { MirnahLoadingRow("جاري تحميل المحتوى…") }
+                state is MirnahContentState.Loading -> item(key = "loading") { MirnahLoadingRow("جاري تحميل الأقسام…") }
                 state is MirnahContentState.Error -> item(key = "error") {
                     MirnahErrorCard((state as MirnahContentState.Error).message, retryLabel = "إعادة المحاولة") { reloadKey++ }
                 }
+                catLoading -> item(key = "cat_loading") { MirnahLoadingRow("جاري تحميل القسم…") }
                 selectedTab == 0 -> {
                     if (kind == 0) {
                         if (filteredMovies.isEmpty()) item(key = "empty_m") { MirnahEmptyRow("لا يوجد محتوى في هذا القسم") }
