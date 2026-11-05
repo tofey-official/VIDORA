@@ -37,6 +37,7 @@ import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material.icons.rounded.Logout
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.StarRate
 import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material3.CircularProgressIndicator
@@ -475,8 +476,9 @@ private fun MirnahContent(
     onLogout: () -> Unit,
 ) {
     val context = LocalContext.current
-    val xt = remember(session.dns to session.username) {
-        XtreamClient(session.dns, session.username, session.password)
+    val cacheDir = remember { MirnahCache.dir(context) }
+    val xt = remember(session.dns to session.username, cacheDir) {
+        XtreamClient(session.dns, session.username, session.password, cacheDir)
     }
 
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
@@ -491,21 +493,34 @@ private fun MirnahContent(
     var state by remember { mutableStateOf<MirnahContentState>(MirnahContentState.Loading) }
     var episodesState by remember { mutableStateOf<MirnahEpisodesState>(MirnahEpisodesState.Idle) }
     var catLoading by remember { mutableStateOf(false) }
+    // Set right before a manual refresh / retry so the next load bypasses the
+    // .txt cache and re-downloads everything once; consumed by the item loader.
+    var forceFresh by remember { mutableStateOf(false) }
 
     // Phase 1 — categories only (a few KB each) so the screen appears fast.
-    // Full stream dumps are 25MB+ (77K movies) and stalled loading forever.
+    // Categories + category items are cached as .txt files (MirnahCache), so on
+    // every reopen they come from disk instantly — no re-downloading. [reloadKey]
+    // (manual refresh / retry) forces one fresh network pass that re-saves the cache.
     LaunchedEffect(session.dns, session.username, reloadKey) {
         state = MirnahContentState.Loading
         openSeries = null
         vodCat = null
         serCat = null
         liveCat = null
+        val fresh = forceFresh
+        forceFresh = false
+        // Auth stays a live call (tiny), but only a real rejection stops the
+        // screen — a network hiccup should not block cached content below.
+        val auth = runCatching { xt.checkAuth() }
+        if (auth.exceptionOrNull() is XtreamAuthException) {
+            state = MirnahContentState.Error(friendlyXtreamError(auth.exceptionOrNull()!!))
+            return@LaunchedEffect
+        }
         val result = runCatching {
-            xt.checkAuth()
             coroutineScope {
-                val vodCatsD = async { xt.vodCategories() }
-                val serCatsD = async { xt.seriesCategories() }
-                val liveCatsD = async { xt.liveCategories() }
+                val vodCatsD = async { xt.vodCategories(fresh) }
+                val serCatsD = async { xt.seriesCategories(fresh) }
+                val liveCatsD = async { xt.liveCategories(fresh) }
                 MirnahContentState.Ready(
                     vodCats = vodCatsD.await(),
                     serCats = serCatsD.await(),
@@ -521,14 +536,19 @@ private fun MirnahContent(
                 liveCat = ready.liveCats.firstOrNull()?.id
                 state = ready
             },
-            onFailure = { state = MirnahContentState.Error(friendlyXtreamError(it)) },
+            onFailure = {
+                state = MirnahContentState.Error(friendlyXtreamError(auth.exceptionOrNull() ?: it))
+            },
         )
     }
 
-    // Phase 2 — fetch the selected category's items on demand (tens of KB),
-    // then cache them in memory for instant switching.
+    // Phase 2 — fetch the selected category's items on demand (tens of KB);
+    // they are cached to .txt files, so a category visited once loads instantly
+    // on every later app start.
     LaunchedEffect(state, selectedTab, kind, vodCat, serCat, liveCat) {
         val ready = state as? MirnahContentState.Ready ?: return@LaunchedEffect
+        val fresh = forceFresh
+        forceFresh = false
         val target = when (selectedTab) {
             0 -> if (kind == 0) vodCat else serCat
             else -> liveCat
@@ -537,19 +557,19 @@ private fun MirnahContent(
             0 -> if (kind == 0) ready.movies.containsKey(target) else ready.series.containsKey(target)
             else -> ready.live.containsKey(target)
         }
-        if (cached) return@LaunchedEffect
+        if (cached && !fresh) return@LaunchedEffect
         catLoading = true
         runCatching {
             when (selectedTab) {
                 0 -> if (kind == 0) {
-                    val list = xt.vodStreams(target)
+                    val list = xt.vodStreams(target, fresh)
                     state = ready.copy(movies = ready.movies + (target to list))
                 } else {
-                    val list = xt.series(target)
+                    val list = xt.series(target, fresh)
                     state = ready.copy(series = ready.series + (target to list))
                 }
                 else -> {
-                    val list = xt.liveStreams(target)
+                    val list = xt.liveStreams(target, fresh)
                     state = ready.copy(live = ready.live + (target to list))
                 }
             }
@@ -564,7 +584,7 @@ private fun MirnahContent(
             return@LaunchedEffect
         }
         episodesState = MirnahEpisodesState.Loading
-        runCatching { xt.seriesInfo(series.id) }
+        runCatching { xt.seriesInfo(series.id, fresh = episodesRetry > 0) }
             .onSuccess { episodesState = MirnahEpisodesState.Ready(it) }
             .onFailure { episodesState = MirnahEpisodesState.Error(friendlyXtreamError(it)) }
     }
@@ -621,6 +641,7 @@ private fun MirnahContent(
         ) {
             item(key = "account") {
                 MirnahAccountStrip(session = session, onLogout = {
+                    MirnahCache.clear(context)
                     MirnahAuth.logout(context)
                     onLogout()
                 })
@@ -630,6 +651,13 @@ private fun MirnahContent(
                 MirnahTabRow(
                     selected = selectedTab,
                     onSelect = { selectedTab = it; if (it == 1) openSeries = null },
+                    onRefresh = {
+                        openSeries = null
+                        episodesRetry = 0
+                        forceFresh = true
+                        reloadKey++
+                    },
+                    refreshing = state is MirnahContentState.Loading || catLoading,
                 )
             }
 
@@ -844,7 +872,13 @@ private fun MirnahTypeBadge(isVip: Boolean) {
  * like the app buttons.
  */
 @Composable
-private fun MirnahTabRow(selected: Int, onSelect: (Int) -> Unit) {
+private fun MirnahTabRow(
+    selected: Int,
+    onSelect: (Int) -> Unit,
+    onRefresh: () -> Unit,
+    refreshing: Boolean,
+) {
+    val c = MaterialTheme.colorScheme
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -865,6 +899,34 @@ private fun MirnahTabRow(selected: Int, onSelect: (Int) -> Unit) {
             onClick = { onSelect(1) },
             modifier = Modifier.weight(1f),
         )
+        // Manual refresh: bypasses the .txt cache once and re-saves fresh data.
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(c.surfaceContainerHigh)
+                .border(
+                    width = 1.dp,
+                    color = c.outlineVariant.copy(alpha = 0.4f),
+                    shape = RoundedCornerShape(14.dp),
+                )
+                .pressable(pressedScale = 0.94f, enabled = !refreshing, onClick = onRefresh),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (refreshing) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Rounded.Refresh,
+                    contentDescription = "تحديث البيانات",
+                    tint = c.onSurface,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
     }
 }
 

@@ -6,7 +6,11 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.io.IOException
+
+/** Credentials rejected by the server (auth=0) — distinct from network failures. */
+class XtreamAuthException : IOException("AUTH")
 
 /** Xtream category (used for live, movies and series). */
 data class XtCategory(val id: String, val name: String)
@@ -67,25 +71,35 @@ data class XtSeriesInfo(
  *  - movies:    get_vod_categories  / get_vod_streams   → {dns}/movie/u/p/{id}.{ext}
  *  - series:    get_series_categories/get_series/get_series_info → {dns}/series/u/p/{id}.{ext}
  */
-class XtreamClient(private val dns: String, private val username: String, private val password: String) {
+class XtreamClient(
+    private val dns: String,
+    private val username: String,
+    private val password: String,
+    private val cacheDir: File? = null,
+) {
 
     private val base = MirnahCodes.normalizeDns(dns)
+    private val fp = MirnahCache.fingerprint(dns, username, password)
 
-    /** Verify credentials; throws IOException with an Arabic-friendly cause when rejected. */
+    /** Verify credentials; throws [XtreamAuthException] when rejected. */
     suspend fun checkAuth() {
         val root = jsonGet(null).let { runCatching { JSONObject(it) }.getOrElse { throw IOException("BADRESPONSE") } }
         val userInfo = root.optJSONObject("user_info")
         val auth = userInfo?.optString("auth", "0") == "1"
-        if (!auth) throw IOException("AUTH")
+        if (!auth) throw XtreamAuthException()
     }
 
-    suspend fun liveCategories(): List<XtCategory> = categories("get_live_categories")
-    suspend fun vodCategories(): List<XtCategory> = categories("get_vod_categories")
-    suspend fun seriesCategories(): List<XtCategory> = categories("get_series_categories")
+    suspend fun liveCategories(fresh: Boolean = false): List<XtCategory> = categories("get_live_categories", fresh = fresh)
+    suspend fun vodCategories(fresh: Boolean = false): List<XtCategory> = categories("get_vod_categories", fresh = fresh)
+    suspend fun seriesCategories(fresh: Boolean = false): List<XtCategory> = categories("get_series_categories", fresh = fresh)
 
     /** Channels of one category (category_id filter) — avoids multi-MB full dumps. */
-    suspend fun liveStreams(categoryId: String?): List<XtLive> = withContext(Dispatchers.IO) {
-        val arr = arrayGet("get_live_streams", categoryId?.takeIf { it.isNotBlank() }?.let { mapOf("category_id" to it) } ?: emptyMap())
+    suspend fun liveStreams(categoryId: String?, fresh: Boolean = false): List<XtLive> = withContext(Dispatchers.IO) {
+        val arr = arrayGet(
+            "get_live_streams",
+            categoryId?.takeIf { it.isNotBlank() }?.let { mapOf("category_id" to it) } ?: emptyMap(),
+            fresh,
+        )
         (0 until arr.length()).mapNotNull { i ->
             val o = arr.optJSONObject(i) ?: return@mapNotNull null
             val id = o.optString("stream_id")
@@ -99,8 +113,12 @@ class XtreamClient(private val dns: String, private val username: String, privat
     }
 
     /** Movies of one category (category_id filter) — avoids multi-MB full dumps. */
-    suspend fun vodStreams(categoryId: String?): List<XtMovie> = withContext(Dispatchers.IO) {
-        val arr = arrayGet("get_vod_streams", categoryId?.takeIf { it.isNotBlank() }?.let { mapOf("category_id" to it) } ?: emptyMap())
+    suspend fun vodStreams(categoryId: String?, fresh: Boolean = false): List<XtMovie> = withContext(Dispatchers.IO) {
+        val arr = arrayGet(
+            "get_vod_streams",
+            categoryId?.takeIf { it.isNotBlank() }?.let { mapOf("category_id" to it) } ?: emptyMap(),
+            fresh,
+        )
         (0 until arr.length()).mapNotNull { i ->
             val o = arr.optJSONObject(i) ?: return@mapNotNull null
             val id = o.optString("stream_id")
@@ -117,8 +135,12 @@ class XtreamClient(private val dns: String, private val username: String, privat
     }
 
     /** Series of one category (category_id filter) — avoids multi-MB full dumps. */
-    suspend fun series(categoryId: String?): List<XtSeries> = withContext(Dispatchers.IO) {
-        val arr = arrayGet("get_series", categoryId?.takeIf { it.isNotBlank() }?.let { mapOf("category_id" to it) } ?: emptyMap())
+    suspend fun series(categoryId: String?, fresh: Boolean = false): List<XtSeries> = withContext(Dispatchers.IO) {
+        val arr = arrayGet(
+            "get_series",
+            categoryId?.takeIf { it.isNotBlank() }?.let { mapOf("category_id" to it) } ?: emptyMap(),
+            fresh,
+        )
         (0 until arr.length()).mapNotNull { i ->
             val o = arr.optJSONObject(i) ?: return@mapNotNull null
             val id = o.optString("series_id")
@@ -134,8 +156,8 @@ class XtreamClient(private val dns: String, private val username: String, privat
         }
     }
 
-    suspend fun seriesInfo(seriesId: String): XtSeriesInfo = withContext(Dispatchers.IO) {
-        val text = jsonGet("get_series_info", mapOf("series_id" to seriesId))
+    suspend fun seriesInfo(seriesId: String, fresh: Boolean = false): XtSeriesInfo = withContext(Dispatchers.IO) {
+        val text = jsonGet("get_series_info", mapOf("series_id" to seriesId), fresh)
         val root = runCatching { JSONObject(text) }.getOrElse { throw IOException("BADRESPONSE") }
         val episodesJson = root.optJSONObject("episodes")
         val grouped = linkedMapOf<Int, MutableList<XtEpisode>>()
@@ -183,8 +205,8 @@ class XtreamClient(private val dns: String, private val username: String, privat
 
     // ---- plumbing ---------------------------------------------------------
 
-    private suspend fun categories(action: String): List<XtCategory> = withContext(Dispatchers.IO) {
-        val arr = arrayGet(action)
+    private suspend fun categories(action: String, fresh: Boolean = false): List<XtCategory> = withContext(Dispatchers.IO) {
+        val arr = arrayGet(action, fresh = fresh)
         (0 until arr.length()).mapNotNull { i ->
             val o = arr.optJSONObject(i) ?: return@mapNotNull null
             val id = o.optString("category_id")
@@ -192,8 +214,8 @@ class XtreamClient(private val dns: String, private val username: String, privat
         }
     }
 
-    private suspend fun arrayGet(action: String, params: Map<String, String> = emptyMap()): JSONArray {
-        val text = jsonGet(action, params)
+    private suspend fun arrayGet(action: String, params: Map<String, String> = emptyMap(), fresh: Boolean = false): JSONArray {
+        val text = jsonGet(action, params, fresh)
         val trimmed = text.trim()
         if (!trimmed.startsWith("[")) {
             // Some servers answer errors as {"status":"Failed"...}
@@ -202,23 +224,49 @@ class XtreamClient(private val dns: String, private val username: String, privat
         return runCatching { JSONArray(trimmed) }.getOrElse { throw IOException("BADRESPONSE") }
     }
 
-    private suspend fun jsonGet(action: String?, params: Map<String, String> = emptyMap()): String =
-        withContext(Dispatchers.IO) {
-            val builder = "$base/player_api.php".toHttpUrlOrNull()?.newBuilder()
-                ?: throw IOException("BADDNS")
-            builder.addQueryParameter("username", username)
-            builder.addQueryParameter("password", password)
-            if (action != null) builder.addQueryParameter("action", action)
-            params.forEach { (k, v) -> builder.addQueryParameter(k, v) }
-            val request = Request.Builder()
-                .url(builder.build())
-                .header("User-Agent", Net.USER_AGENT)
-                .build()
+    /**
+     * GET a player_api response. [action] == null (auth check) is always live;
+     * every other response is cached to a .txt file under [cacheDir] and served
+     * from disk while fresh ([MirnahCache.MAX_AGE_MS]) — so reopening the app
+     * never re-downloads the same data. On network failure any cached copy,
+     * even a stale one, is used before giving up.
+     */
+    private suspend fun jsonGet(
+        action: String?,
+        params: Map<String, String> = emptyMap(),
+        fresh: Boolean = false,
+    ): String = withContext(Dispatchers.IO) {
+        val cacheKey = action?.let { MirnahCache.key(it, params) }
+        if (!fresh && cacheKey != null && cacheDir != null) {
+            MirnahCache.read(cacheDir, cacheKey, fp)?.let { return@withContext it.body }
+        }
+        val builder = "$base/player_api.php".toHttpUrlOrNull()?.newBuilder()
+            ?: throw IOException("BADDNS")
+        builder.addQueryParameter("username", username)
+        builder.addQueryParameter("password", password)
+        if (action != null) builder.addQueryParameter("action", action)
+        params.forEach { (k, v) -> builder.addQueryParameter(k, v) }
+        val request = Request.Builder()
+            .url(builder.build())
+            .header("User-Agent", Net.USER_AGENT)
+            .build()
+        val text = try {
             Net.client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) throw IOException("HTTP${response.code}")
                 response.body?.string() ?: throw IOException("BADRESPONSE")
             }
+        } catch (e: IOException) {
+            if (cacheKey != null && cacheDir != null) {
+                MirnahCache.read(cacheDir, cacheKey, fp, maxAgeMs = Long.MAX_VALUE)
+                    ?.let { return@withContext it.body }
+            }
+            throw e
         }
+        if (cacheKey != null && cacheDir != null && text.isNotBlank()) {
+            MirnahCache.write(cacheDir, cacheKey, fp, text)
+        }
+        text
+    }
 
     private companion object {
         /** Tidy IPTV names: collapse blank runs and trim pipe/space noise. */
