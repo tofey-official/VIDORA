@@ -651,6 +651,7 @@ fun YtxTubeApp() {
                     onSearch = { openSearch = true },
                     onAccount = { openSettings = true },
                     scrollToTop = scrollToTop[Tab.Mirnah] ?: 0,
+                    onPlay = { player.open(it) },
                 )
             }
         }
