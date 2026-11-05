@@ -692,6 +692,7 @@ fun LibraryScreen(
 
             item(key = "playlistsTitle") { SectionTitle("Playlists") }
             val pinned = listOf(
+                PlaylistRef("DL", I18n.t("downloads", "المحفوظات"), null, null),
                 PlaylistRef("WL", "Watch later", null, null),
                 PlaylistRef("MDL", "VIDORA Music Downloads", null, null),
                 PlaylistRef("LL", "Liked videos", null, null),

@@ -240,7 +240,7 @@ enum class Tab(val defaultLabel: String, val icon: ImageVector, val selectedIcon
     Music("Music", Icons.Outlined.MusicNote, Icons.Rounded.MusicNote),
     Shorts("Shorts", Icons.Outlined.PlayCircle, Icons.Rounded.PlayCircle),
     Library("Library", Icons.Outlined.VideoLibrary, Icons.Rounded.VideoLibrary),
-    Downloads("مرناة", Icons.Outlined.LiveTv, Icons.Rounded.LiveTv);
+    Mirnah("مرناة", Icons.Outlined.LiveTv, Icons.Rounded.LiveTv);
 
     val label: String
         get() = when (this) {
@@ -248,7 +248,7 @@ enum class Tab(val defaultLabel: String, val icon: ImageVector, val selectedIcon
             Music -> I18n.t("tab_music", defaultLabel)
             Shorts -> I18n.t("tab_shorts", defaultLabel)
             Library -> I18n.t("tab_library", defaultLabel)
-            Downloads -> I18n.t("tab_downloads", defaultLabel)
+            Mirnah -> I18n.t("tab_mirnah", defaultLabel)
         }
 }
 
@@ -273,6 +273,7 @@ fun YtxTubeApp() {
     var shortsEntry by remember { mutableStateOf<VideoItem?>(null) }
     var openAllSubscriptions by remember { mutableStateOf(false) }
     var openSearch by remember { mutableStateOf(false) }
+    var openDownloads by remember { mutableStateOf(false) }
     var tab by rememberSaveable { mutableStateOf(Tab.Home) }
     var isShortsCommentsOpen by remember { mutableStateOf(false) }
 
@@ -464,7 +465,7 @@ fun YtxTubeApp() {
     BackHandler(enabled = !showFullscreen && player.expanded) { player.expanded = false }
     BackHandler(enabled = !player.expanded && openSettings) { openSettings = false }
     BackHandler(enabled = !player.expanded && openAllSubscriptions && openChannel == null) { openAllSubscriptions = false }
-    BackHandler(enabled = !player.expanded && tab != Tab.Home && openPlaylist == null && openChannel == null && !openAllSubscriptions) {
+    BackHandler(enabled = !player.expanded && tab != Tab.Home && openPlaylist == null && openChannel == null && !openAllSubscriptions && !openDownloads) {
         if (tab == Tab.Shorts && isShortsPlaying && pip.supported) {
             val entered = pip.enter(9f / 16f)
             if (!entered) tab = Tab.Home
@@ -472,6 +473,7 @@ fun YtxTubeApp() {
             tab = Tab.Home
         }
     }
+    BackHandler(enabled = !player.expanded && openDownloads) { openDownloads = false }
     BackHandler(enabled = !player.expanded && openSearch) { openSearch = false }
     BackHandler(enabled = !player.expanded && openPlaylist != null) { openPlaylist = null }
     BackHandler(enabled = signingIn) { signingIn = false }
@@ -484,7 +486,7 @@ fun YtxTubeApp() {
     }
     BackHandler(enabled = updateState.visible) { updateState.dismiss() }
 
-    val canHandleRootBack = !player.expanded && !openSettings && !openAllSubscriptions &&
+    val canHandleRootBack = !player.expanded && !openSettings && !openAllSubscriptions && !openDownloads &&
         tab == Tab.Home && openPlaylist == null && openChannel == null &&
         !openSearch && !signingIn && !showFullscreen && shortsEntry == null && !updateState.visible
     BackHandler(enabled = canHandleRootBack) {
@@ -633,7 +635,7 @@ fun YtxTubeApp() {
                     onCommentsOpenChange = { isShortsCommentsOpen = it },
                 )
                 Tab.Library -> LibraryScreen(
-                    lib, contentPadding, onOpen = player::open, onOpenPlaylist = { ref -> if (ref.id == "DL") tab = Tab.Downloads else openPlaylist = ref },
+                    lib, contentPadding, onOpen = player::open, onOpenPlaylist = { ref -> if (ref.id == "DL") openDownloads = true else openPlaylist = ref },
                     onOpenChannel = { url ->
                         player.expanded = false
                         if (channelState?.url != url) channelState = ChannelState(url, scope)
@@ -644,15 +646,11 @@ fun YtxTubeApp() {
                     onSignIn = { signingIn = true }, onAccount = { openSettings = true },
                     scrollToTop = scrollToTop[Tab.Library] ?: 0,
                 )
-                Tab.Downloads -> DownloadsScreen(
-                    contentPadding,
-                    onOpen = player::open,
-                    onOpenMusic = player::openMusic,
-                    onBrowse = { tab = Tab.Home },
-                    onBrowseMusic = { tab = Tab.Music },
+                Tab.Mirnah -> MirnahScreen(
+                    contentPadding = contentPadding,
                     onSearch = { openSearch = true },
                     onAccount = { openSettings = true },
-                    scrollToTop = scrollToTop[Tab.Downloads] ?: 0,
+                    scrollToTop = scrollToTop[Tab.Mirnah] ?: 0,
                 )
             }
         }
@@ -750,6 +748,23 @@ fun YtxTubeApp() {
             )
         }
 
+        AnimatedVisibility(
+            visible = openDownloads,
+            enter = if (reduced) fadeIn(snap()) else slideInHorizontally(tween(340, easing = Motion.Emphasized)) { it } + fadeIn(tween(120)),
+            exit = if (reduced) fadeOut(snap()) else slideOutHorizontally(tween(300, easing = Motion.Emphasized)) { it } + fadeOut(tween(220)),
+        ) {
+            DownloadsScreen(
+                contentPadding = contentPadding,
+                onOpen = player::open,
+                onOpenMusic = player::openMusic,
+                onBrowse = { openDownloads = false; tab = Tab.Home },
+                onBrowseMusic = { openDownloads = false; tab = Tab.Music },
+                onSearch = { openSearch = true },
+                onAccount = { openSettings = true },
+                onBack = { openDownloads = false },
+            )
+        }
+
 
         BottomGestureGuard(Modifier.align(Alignment.BottomCenter))
 
@@ -835,11 +850,13 @@ fun YtxTubeApp() {
             when {
 
                 selected == tab && openSearch -> openSearch = false
+                selected == tab && openDownloads -> openDownloads = false
                 selected == tab && openChannel != null -> openChannel = null
                 selected == tab && openPlaylist != null -> openPlaylist = null
                 selected == tab && openAllSubscriptions -> openAllSubscriptions = false
                 selected == tab -> scrollToTop[selected] = (scrollToTop[selected] ?: 0) + 1
                 else -> {
+                    openDownloads = false
                     openPlaylist = null
                     openChannel = null
                     openAllSubscriptions = false
@@ -850,7 +867,7 @@ fun YtxTubeApp() {
         }
 
 
-        val showBottomBar = !openSettings && shortsEntry == null && !pip.active && (tab != Tab.Shorts || !isShortsCommentsOpen)
+        val showBottomBar = !openSettings && !openDownloads && shortsEntry == null && !pip.active && (tab != Tab.Shorts || !isShortsCommentsOpen)
         AnimatedVisibility(
             visible = showBottomBar,
             enter = slideInVertically(tween(260, easing = Motion.Emphasized)) { it } + fadeIn(tween(160)),
@@ -1008,7 +1025,7 @@ fun YtxTubeApp() {
                     Spacer(Modifier.width(8.dp))
                     TextButton(
                         onClick = {
-                            tab = Tab.Downloads
+                            openDownloads = true
                             downloadNotice = null
                             if (showPlayer) player.expanded = false
                         },

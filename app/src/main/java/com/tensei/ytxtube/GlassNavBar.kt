@@ -427,7 +427,7 @@ fun RowScope.LiquidNavTab(
 ) {
     val isLightTheme = !isDarkSurface && !isSystemInDarkTheme() && ThemeSettings.mode != "dark" && ThemeSettings.mode != "amoled"
     val contentColor = if (isLightTheme) Color.Black else Color.White
-    val active = tab == Tab.Downloads && Downloads.busy
+    val active = tab == Tab.Mirnah && Downloads.busy
 
     LiquidBottomTab(onClick = onClick) {
         Box(

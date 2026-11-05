@@ -223,6 +223,7 @@ fun DownloadsScreen(
     onBrowseMusic: () -> Unit,
     onSearch: () -> Unit,
     onAccount: () -> Unit,
+    onBack: (() -> Unit)? = null,
     scrollToTop: Int = 0,
 ) {
     val tasks = Downloads.tasks
@@ -234,7 +235,22 @@ fun DownloadsScreen(
     val shown = if (section == 0) videos else music
     CollapsingHeaderLayout(
         resetKey = scrollToTop to listOf(tasks.size, tasks.count { it.status == DownloadStatus.Complete }),
-        header = { ScreenHeader(title = I18n.t("tab_downloads", "مرناة")) { HeaderActions(onSearch, onAccount) } },
+        header = {
+            if (onBack != null) {
+                BackScreenHeader(onBack = onBack) {
+                    Text(
+                        text = I18n.t("downloads", "المحفوظات"),
+                        fontFamily = RoundedHeavy,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    HeaderActions(onSearch, onAccount)
+                }
+            } else {
+                ScreenHeader(title = I18n.t("downloads", "المحفوظات")) { HeaderActions(onSearch, onAccount) }
+            }
+        },
     ) { top ->
         LazyColumn(contentPadding = contentPadding.withTop(top)) {
             item(key = "sections") {
