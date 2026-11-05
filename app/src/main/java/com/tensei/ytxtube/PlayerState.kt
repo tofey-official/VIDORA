@@ -143,13 +143,15 @@ class PlayerState(private val scope: CoroutineScope) {
     init {
 
         scope.launch {
-            snapshotFlow { StreamRecovery.recovering to StreamRecovery.failed }.collect { (_, failed) ->
-                syncFromPlayer()
-                if (failed != null && failed.first == current?.id) {
-                    error = failed.second
-                    isBuffering = false
+            snapshotFlow { Triple(StreamRecovery.recovering, StreamRecovery.failed, StreamRecovery.failedEpoch) }
+                .collect { (_, _) ->
+                    syncFromPlayer()
+                    val failed = StreamRecovery.failed
+                    if (failed != null && failed.first == current?.id) {
+                        error = failed.second
+                        isBuffering = false
+                    }
                 }
-            }
         }
     }
     var videoAspect by mutableFloatStateOf(16f / 9f)
@@ -286,6 +288,7 @@ class PlayerState(private val scope: CoroutineScope) {
         if (isMusicMode) RecentMusic.record(item)
         details = null
         error = null
+        StreamRecovery.clearFailed()
         firstFrameRendered = false
         videoAspect = 16f / 9f
         aspectFromFrames = false
@@ -1050,6 +1053,20 @@ class PlayerState(private val scope: CoroutineScope) {
             val status = (e.cause as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)?.responseCode
             Log.w(TAG, "playback error ${e.errorCodeName}${status?.let { " (HTTP $it)" } ?: ""} for ${current?.id}", e)
 
+            if (current?.localUri != null) {
+                // مرناة playback: the service's StreamRecoverer retries automatically —
+                // while it does (recovering == id) keep showing buffering, and only
+                // surface an error once it gives up (or for instantly-fatal failures).
+                if (StreamRecovery.recovering == current?.id) return
+                error = when (e.errorCode) {
+                    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+                    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+                    PlaybackException.ERROR_CODE_TIMEOUT,
+                    -> "انقطع الاتصال بالبث — تحقق من الإنترنت وحاول مجدداً"
+                    else -> "تعذّر تشغيل هذا المحتوى — حاول مجدداً"
+                }
+                return
+            }
             if (e.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS && StreamRecovery.recovering == current?.id) return
             error = when (e.errorCode) {
                 PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,

@@ -27,11 +27,37 @@ object Net {
             .build()
     }
 
+    /**
+     * Client for direct media streams (مرناة/Xtream): a stalled stream fails fast
+     * into the retry/recovery loop instead of hanging for 90 s on weak networks.
+     */
+    val mediaClient: OkHttpClient by lazy {
+        val dispatcher = okhttp3.Dispatcher().apply {
+            maxRequests = 32
+            maxRequestsPerHost = 16
+        }
+        OkHttpClient.Builder()
+            .dispatcher(dispatcher)
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .connectionPool(okhttp3.ConnectionPool(16, 3, TimeUnit.MINUTES))
+            .build()
+    }
 
-    @Volatile private var mediaHost: String? = null
 
+    @Volatile private var mediaPrewarmUrl: String? = null
+
+    /** Remember a media/API url whose host should be warmed before playback. */
     fun noteMediaHost(url: String?) {
-        url?.toHttpUrlOrNull()?.host?.let { mediaHost = it }
+        mediaPrewarmUrl = url
+    }
+
+    /** Note and warm an arbitrary url (e.g. the Xtream player_api endpoint). */
+    fun prewarm(url: String) {
+        if (url.toHttpUrlOrNull() == null) return
+        if (url == mediaPrewarmUrl) return
+        noteMediaHost(url)
+        prewarmMediaConnection()
     }
 
     
@@ -39,9 +65,14 @@ object Net {
 
 
 
+    /**
+     * Open (and immediately close) a HEAD connection to the last noted url —
+     * resolves DNS + TCP (and the proxy hop) ahead of the real playback request,
+     * the same head start YouTube streams get.
+     */
     fun prewarmMediaConnection() {
-        val host = mediaHost ?: return
-        val request = okhttp3.Request.Builder().url("https://$host/generate_204").head().header("User-Agent", USER_AGENT).build()
+        val url = mediaPrewarmUrl?.toHttpUrlOrNull() ?: return
+        val request = okhttp3.Request.Builder().url(url).head().header("User-Agent", USER_AGENT).build()
         client.newCall(request).enqueue(object : okhttp3.Callback {
             override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {}
             override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) = response.close()

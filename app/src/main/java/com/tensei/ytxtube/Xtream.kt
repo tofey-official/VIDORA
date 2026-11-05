@@ -193,6 +193,9 @@ class XtreamClient(
 
     // ---- stream URLs ------------------------------------------------------
 
+    /** Cheap API url used only to prewarm DNS+TCP to the IPTV host before playback. */
+    fun prewarmUrl(): String = "$base/player_api.php?username=$username&password=$password"
+
     /** Live channels on this server are MPEG-TS (m3u8 is rejected with 403). */
     fun liveUrl(streamId: String, extension: String = "ts"): String =
         "$base/live/$username/$password/$streamId.$extension"

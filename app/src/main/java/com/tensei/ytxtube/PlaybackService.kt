@@ -8,6 +8,7 @@ import android.util.Log
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.media3.common.PlaybackException
@@ -21,6 +22,7 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.dash.DashMediaSource
@@ -38,6 +40,7 @@ import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.exoplayer.source.SingleSampleMediaSource
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -216,6 +219,14 @@ object StreamRecovery {
 
     var failed by mutableStateOf<Pair<String, String>?>(null)
         internal set
+
+    /** Bumped every time a stream recovery finally gives up, so observers re-arm. */
+    var failedEpoch by mutableIntStateOf(0)
+        internal set
+
+    internal fun clearFailed() {
+        failed = null
+    }
 }
 
 
@@ -236,12 +247,16 @@ private class StreamRecoverer(
     private var lastPositionMs = 0L
 
     override fun onPlayerError(error: PlaybackException) {
-        if (error.errorCode != PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS) return
         val item = player.currentMediaItem ?: return
 
-        // Direct Xtream/مرناة URLs are re-fetched as-is by ExoPlayer's loader;
-        // YouTube re-extraction cannot fix them, so don't try.
-        if (item.requestMetadata.mediaUri != null) return
+        // Direct Xtream/مرناة URLs cannot be re-extracted — but on weak networks they
+        // hit transient timeouts / proxy 502-503s. Retry them automatically with
+        // backoff, exactly like a YouTube stream recovery, instead of failing hard.
+        if (item.requestMetadata.mediaUri != null) {
+            handleDirectError(item, error)
+            return
+        }
+        if (error.errorCode != PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS) return
         if (item.localConfiguration?.uri?.scheme == "file") return
         val id = item.mediaId
         val position = player.currentPosition
@@ -283,8 +298,95 @@ private class StreamRecoverer(
         player.prepare()
     }
 
+    // ---- direct مرناة/Xtream recovery -------------------------------------
+
+    private var directAttempts = 0
+    private var directPending: Runnable? = null
+
+    private fun handleDirectError(item: MediaItem, error: PlaybackException) {
+        cancelDirectRetry()
+        val id = item.mediaId
+        if (!directRecoverable(error) || directAttempts >= MAX_DIRECT_ATTEMPTS) {
+            giveUpDirect(id, messageFor(error))
+            return
+        }
+        directAttempts++
+        val positionMs = player.currentPosition
+        val playWhenReady = player.playWhenReady
+        val delay = BACKOFF_MS.getOrElse(directAttempts - 1) { BACKOFF_MS.last() }
+        StreamRecovery.failed = null
+        StreamRecovery.recovering = id
+        Log.i("YTXTube", "iptv stream error ${error.errorCodeName} for $id; retry #$directAttempts in ${delay}ms")
+        val run = Runnable { retryDirect(item, positionMs, playWhenReady, error) }
+        directPending = run
+        main.postDelayed(run, delay)
+    }
+
+    private fun retryDirect(item: MediaItem, positionMs: Long, playWhenReady: Boolean, error: PlaybackException) {
+        directPending = null
+        val id = item.mediaId
+        if (player.currentMediaItem?.mediaId != id) {
+            StreamRecovery.recovering = null
+            return
+        }
+        if (player.playerError == null) return
+        val live = player.duration == C.TIME_UNSET
+        when {
+            live || error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW -> player.seekToDefaultPosition()
+            error.errorCode == PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE -> player.seekTo(0)
+            else -> player.seekTo(player.currentMediaItemIndex, positionMs)
+        }
+        player.prepare()
+        if (playWhenReady) player.play()
+    }
+
+    private fun giveUpDirect(id: String, message: String) {
+        Log.w("YTXTube", "iptv stream recovery gave up for $id: $message")
+        StreamRecovery.recovering = null
+        StreamRecovery.failedEpoch++
+        StreamRecovery.failed = id to message
+    }
+
+    private fun cancelDirectRetry() {
+        directPending?.let { main.removeCallbacks(it) }
+        directPending = null
+    }
+
+    override fun onIsPlayingChanged(isPlaying: Boolean) {
+        // A recovered (or healthy) stream wipes the attempt budget.
+        if (isPlaying && player.playerError == null) directAttempts = 0
+    }
+
+    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+        cancelDirectRetry()
+    }
+
+    private fun directRecoverable(error: PlaybackException): Boolean = when (error.errorCode) {
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+        PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE,
+        PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+        PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE,
+        PlaybackException.ERROR_CODE_TIMEOUT,
+        PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW,
+        PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+        -> true
+        else -> false
+    }
+
+    private fun messageFor(error: PlaybackException): String = when (error.errorCode) {
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+        PlaybackException.ERROR_CODE_TIMEOUT,
+        -> "انقطع الاتصال بالبث — تحقق من الإنترنت وحاول مجدداً"
+        PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> "الخادم مشغول أو البث غير متاح حالياً — حاول بعد قليل"
+        else -> "تعذّر تشغيل هذا المحتوى — حاول مجدداً"
+    }
+
     private companion object {
         const val PROGRESS_MS = 30_000L
+        const val MAX_DIRECT_ATTEMPTS = 5
+        val BACKOFF_MS = longArrayOf(1_000, 2_000, 4_000, 6_000, 8_000)
     }
 }
 
@@ -489,7 +591,15 @@ private class YouTubeMediaSourceFactory(context: Context) : MediaSource.Factory 
         context,
         OkHttpDataSource.Factory(Net.client).setUserAgent(Net.USER_AGENT),
     )
+    // مرناة/Xtream direct streams: fast-fail HTTP client + retrying error policy, so
+    // transient 5xx from the panel proxy and weak-network stalls recover like YouTube.
+    private val iptvDataSourceFactory: DataSource.Factory = DefaultDataSource.Factory(
+        context,
+        OkHttpDataSource.Factory(Net.mediaClient).setUserAgent(Net.USER_AGENT),
+    )
     private val fallback = DefaultMediaSourceFactory(dataSourceFactory)
+    private val iptvFactory = DefaultMediaSourceFactory(iptvDataSourceFactory)
+        .setLoadErrorHandlingPolicy(IptvLoadErrorPolicy())
 
     override fun setDrmSessionManagerProvider(provider: DrmSessionManagerProvider): MediaSource.Factory =
         apply { fallback.setDrmSessionManagerProvider(provider) }
@@ -507,7 +617,12 @@ private class YouTubeMediaSourceFactory(context: Context) : MediaSource.Factory 
         if (mediaItem.localConfiguration?.uri?.scheme == "file") {
             return fallback.createMediaSource(mediaItem)
         }
-        val info = StreamCache.get(mediaItem.mediaId) ?: return fallback.createMediaSource(mediaItem)
+        val info = StreamCache.get(mediaItem.mediaId) ?: return if (mediaItem.requestMetadata.mediaUri != null) {
+            // Direct مرناة/Xtream url (no YouTube extraction data).
+            iptvFactory.createMediaSource(mediaItem)
+        } else {
+            fallback.createMediaSource(mediaItem)
+        }
         val isLive = info.streamType == org.schabi.newpipe.extractor.stream.StreamType.LIVE_STREAM
         val hlsUrl = info.hlsUrl?.ifBlank { null }
         // HLS is a live fallback only. A VOD HLS manifest carries just YouTube's default audio
@@ -609,5 +724,30 @@ private class YouTubeMediaSourceFactory(context: Context) : MediaSource.Factory 
 
         return ProgressiveMediaSource.Factory(dataSourceFactory)
             .createMediaSource(mediaItem.buildUpon().setUri(url).build())
+    }
+}
+
+/**
+ * Retrying policy for مرناة/Xtream direct streams. The stock policy treats every
+ * InvalidResponseCodeException (including a transient proxy 502/503) as fatal, which
+ * kills playback on weak networks. Here: 4xx is fatal, everything else — server busy,
+ * timeouts, dropped connections — is retried with a steady backoff.
+ */
+@OptIn(UnstableApi::class)
+private class IptvLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
+
+    override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
+        val responseCode = (loadErrorInfo.exception as? HttpDataSource.InvalidResponseCodeException)?.responseCode
+        if (responseCode != null && responseCode in 400..499 && responseCode != 408 && responseCode != 429) {
+            return C.TIME_UNSET // dead or rejected link — no point retrying
+        }
+        if (loadErrorInfo.errorCount > MAX_RETRIES) return C.TIME_UNSET
+        return minOf(2_000L * loadErrorInfo.errorCount, 8_000L)
+    }
+
+    override fun getMinimumLoadableRetryCount(dataType: Int): Int = MAX_RETRIES
+
+    private companion object {
+        const val MAX_RETRIES = 6
     }
 }

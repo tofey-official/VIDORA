@@ -480,6 +480,12 @@ private fun MirnahContent(
     val xt = remember(session.dns to session.username, cacheDir) {
         XtreamClient(session.dns, session.username, session.password, cacheDir)
     }
+    // Warm the IPTV host connection right before playback so weak networks get the
+    // same head start (DNS+TCP already open) YouTube items already get.
+    val playXt: (VideoItem) -> Unit = { item ->
+        Net.prewarm(xt.prewarmUrl())
+        onPlay(item)
+    }
 
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var kind by rememberSaveable { mutableIntStateOf(0) } // 0 = أفلام، 1 = مسلسلات
@@ -530,6 +536,8 @@ private fun MirnahContent(
         }
         result.fold(
             onSuccess = { ready ->
+                // Warm the host so the first tap doesn't pay DNS+TCP latency.
+                Net.prewarm(xt.prewarmUrl())
                 // Open on the first category instead of a full "الكل" dump.
                 vodCat = ready.vodCats.firstOrNull()?.id
                 serCat = ready.serCats.firstOrNull()?.id
@@ -712,7 +720,7 @@ private fun MirnahContent(
                                             MirnahEpisodeRow(
                                                 episode = ep,
                                                 modifier = Modifier.animateItem(),
-                                                onClick = { onPlay(ep.videoItem(xt, series)) },
+                                                onClick = { playXt(ep.videoItem(xt, series)) },
                                             )
                                         }
                                     }
@@ -735,7 +743,7 @@ private fun MirnahContent(
                                 movie = movie,
                                 catName = vodCatNames[movie.categoryId],
                                 modifier = Modifier.animateItem(),
-                                onClick = { onPlay(movie.videoItem(xt)) },
+                                onClick = { playXt(movie.videoItem(xt)) },
                             )
                         }
                     } else {
@@ -757,7 +765,7 @@ private fun MirnahContent(
                             channel = channel,
                             catName = liveCatNames[channel.categoryId],
                             modifier = Modifier.animateItem(),
-                            onClick = { onPlay(channel.videoItem(xt)) },
+                            onClick = { playXt(channel.videoItem(xt)) },
                         )
                     }
                 }
