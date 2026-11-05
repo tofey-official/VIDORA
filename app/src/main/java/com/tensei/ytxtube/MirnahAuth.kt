@@ -1,6 +1,7 @@
 package com.tensei.ytxtube
 
 import android.content.Context
+import android.util.Base64
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
@@ -8,6 +9,9 @@ import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import javax.crypto.Cipher
+import javax.crypto.spec.IvParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 /**
  * Saved Mirnah session — an activated code bound to its Xtream server.
@@ -155,6 +159,33 @@ object MirnahCodes {
 
     private const val CODES_URL = "https://vidora1.pages.dev/codes.json"
 
+    /**
+     * The panel (لوحتي / IPTV Panel Pro) encrypts every data file with
+     * AES-256-CBC before saving/publishing it: openssl_encrypt(
+     * 'aes-256-cbc', AES_KEY, OPENSSL_RAW_DATA, iv) then base64(iv + ct).
+     * The random 16-byte IV is PREPENDED to the ciphertext, and the raw
+     * 32-char key string is used directly as the AES-256 key.
+     */
+    private const val AES_KEY = "1997219972@@aas1997219972@@aas12"
+
+    /**
+     * Mirror of the panel's decryptAES(): base64 decode, take the first
+     * 16 bytes as the IV, decrypt the rest with AES-256-CBC/PKCS7.
+     * Returns null when the payload is not valid encrypted content.
+     */
+    fun decryptAes(cipherText: String): String? = runCatching {
+        val data = Base64.decode(cipherText.trim(), Base64.DEFAULT)
+        if (data.size < 32 || (data.size - 16) % 16 != 0) return null
+        val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+        cipher.init(
+            Cipher.DECRYPT_MODE,
+            SecretKeySpec(AES_KEY.toByteArray(Charsets.UTF_8), "AES"),
+            IvParameterSpec(data, 0, 16),
+        )
+        val plain = cipher.doFinal(data, 16, data.size - 16)
+        String(plain, Charsets.UTF_8)
+    }.getOrNull()
+
     sealed class Fetch {
         data class Ok(val list: List<JSONObject>) : Fetch()
         object Bad : Fetch()
@@ -171,8 +202,12 @@ object MirnahCodes {
                 if (!response.isSuccessful) return Fetch.Bad
                 val body = response.body?.string() ?: return Fetch.Bad
                 val trimmed = body.trim().trimStart('\uFEFF')
-                if (!trimmed.startsWith("[") && !trimmed.startsWith("{")) return Fetch.Bad
-                val list = when (val parsed = parseJson(trimmed)) {
+                // The panel publishes the file AES-encrypted; plain JSON is
+                // also accepted so older deployments keep working.
+                val json = if (trimmed.startsWith("[") || trimmed.startsWith("{")) trimmed
+                else decryptAes(trimmed)?.trim()?.takeIf { it.startsWith("[") || it.startsWith("{") }
+                    ?: return Fetch.Bad
+                val list = when (val parsed = parseJson(json)) {
                     is JSONArray -> (0 until parsed.length()).map { parsed.getJSONObject(it) }
                     is JSONObject -> listOf(parsed)
                     else -> return Fetch.Bad
