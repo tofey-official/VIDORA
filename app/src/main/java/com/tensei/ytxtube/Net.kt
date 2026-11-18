@@ -22,14 +22,15 @@ object Net {
         OkHttpClient.Builder()
             .dispatcher(dispatcher)
             .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(90, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
             .connectionPool(okhttp3.ConnectionPool(32, 5, TimeUnit.MINUTES))
             .build()
     }
 
     /**
      * Client for direct media streams (مرناة/Xtream): a stalled stream fails fast
-     * into the retry/recovery loop instead of hanging for 90 s on weak networks.
+     * into the retry/recovery loop instead of hanging for a full read timeout on
+     * weak networks (Blue-Plus style: 10 s connect / 20 s read).
      */
     val mediaClient: OkHttpClient by lazy {
         val dispatcher = okhttp3.Dispatcher().apply {
@@ -49,29 +50,21 @@ object Net {
 
     /** Remember a media/API url whose host should be warmed before playback. */
     fun noteMediaHost(url: String?) {
-        mediaPrewarmUrl = url
+        if (url?.toHttpUrlOrNull() != null) mediaPrewarmUrl = url
     }
 
-    /** Note and warm an arbitrary url (e.g. the Xtream player_api endpoint). */
+    /** Warm DNS+TCP to a media/API host with one cheap HEAD call (fire and forget). */
     fun prewarm(url: String) {
         if (url.toHttpUrlOrNull() == null) return
-        if (url == mediaPrewarmUrl) return
-        noteMediaHost(url)
+        mediaPrewarmUrl = url
         prewarmMediaConnection()
     }
 
-    
 
 
 
-
-    /**
-     * Open (and immediately close) a HEAD connection to the last noted url —
-     * resolves DNS + TCP (and the proxy hop) ahead of the real playback request,
-     * the same head start YouTube streams get.
-     */
     fun prewarmMediaConnection() {
-        val url = mediaPrewarmUrl?.toHttpUrlOrNull() ?: return
+        val url = mediaPrewarmUrl ?: return
         val request = okhttp3.Request.Builder().url(url).head().header("User-Agent", USER_AGENT).build()
         client.newCall(request).enqueue(object : okhttp3.Callback {
             override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {}

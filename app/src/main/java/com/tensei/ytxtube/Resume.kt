@@ -78,8 +78,12 @@ class ResumeSaver(private val player: Player) : Player.Listener {
 
     fun saveNow() {
         val id = player.currentMediaItem?.mediaId ?: return
+        // Live/unknown-length streams have no position worth resuming; saving one
+        // would make the next open replay stale footage instead of the live edge.
+        val duration = player.duration
+        if (duration <= 0) return
         lastId = id
-        ResumeStore.save(id, player.currentPosition, player.duration)
+        ResumeStore.save(id, player.currentPosition, duration)
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {

@@ -46,6 +46,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -77,6 +78,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -486,6 +488,8 @@ private fun MirnahContent(
         Net.prewarm(xt.prewarmUrl())
         onPlay(item)
     }
+    val bulkDir = remember { File(context.cacheDir, "mirnah_bulk").apply { mkdirs() } }
+    val bulkProgress = MirnahBulk.progress.collectAsState()
 
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var kind by rememberSaveable { mutableIntStateOf(0) } // 0 = أفلام، 1 = مسلسلات
@@ -494,45 +498,43 @@ private fun MirnahContent(
     var liveCat by rememberSaveable { mutableStateOf<String?>(null) }
     var openSeries by remember { mutableStateOf<XtSeries?>(null) }
     var reloadKey by remember { mutableIntStateOf(0) }
+    var freshDone by remember { mutableIntStateOf(0) }
     var episodesRetry by remember { mutableIntStateOf(0) }
 
     var state by remember { mutableStateOf<MirnahContentState>(MirnahContentState.Loading) }
     var episodesState by remember { mutableStateOf<MirnahEpisodesState>(MirnahEpisodesState.Idle) }
-    var catLoading by remember { mutableStateOf(false) }
-    // Set right before a manual refresh / retry so the next load bypasses the
-    // .txt cache and re-downloads everything once; consumed by the item loader.
-    var forceFresh by remember { mutableStateOf(false) }
 
-    // Phase 1 — categories only (a few KB each) so the screen appears fast.
-    // Categories + category items are cached as .txt files (MirnahCache), so on
-    // every reopen they come from disk instantly — no re-downloading. [reloadKey]
-    // (manual refresh / retry) forces one fresh network pass that re-saves the cache.
+    // Blue-Plus style: everything (categories + all items) downloads in one
+    // sequential pass per session and is cached to disk, so re-entering this
+    // screen is instant. [reloadKey] (manual refresh / retry) forces one fresh pass.
     LaunchedEffect(session.dns, session.username, reloadKey) {
         state = MirnahContentState.Loading
         openSeries = null
         vodCat = null
         serCat = null
         liveCat = null
-        val fresh = forceFresh
-        forceFresh = false
-        // Auth stays a live call (tiny), but only a real rejection stops the
-        // screen — a network hiccup should not block cached content below.
+        val forceFresh = reloadKey != freshDone
+        freshDone = reloadKey
+        // Auth stays a live call (tiny): only a real rejection stops the screen;
+        // a network hiccup should not block cached content below.
         val auth = runCatching { xt.checkAuth() }
         if (auth.exceptionOrNull() is XtreamAuthException) {
             state = MirnahContentState.Error(friendlyXtreamError(auth.exceptionOrNull()!!))
             return@LaunchedEffect
         }
         val result = runCatching {
-            coroutineScope {
-                val vodCatsD = async { xt.vodCategories(fresh) }
-                val serCatsD = async { xt.seriesCategories(fresh) }
-                val liveCatsD = async { xt.liveCategories(fresh) }
-                MirnahContentState.Ready(
-                    vodCats = vodCatsD.await(),
-                    serCats = serCatsD.await(),
-                    liveCats = liveCatsD.await(),
-                )
-            }
+            // Blue-Plus style: one sequential bulk pass downloads everything to
+            // disk and streams it into memory, so every category is instant.
+            val data = MirnahBulk.load(xt, bulkDir, forceFresh)
+            Net.noteMediaHost(xt.prewarmUrl())
+            MirnahContentState.Ready(
+                vodCats = data.vodCats,
+                serCats = data.serCats,
+                liveCats = data.liveCats,
+                movies = data.movies.groupBy { it.categoryId },
+                series = data.series.groupBy { it.categoryId },
+                live = data.live.groupBy { it.categoryId },
+            )
         }
         result.fold(
             onSuccess = { ready ->
@@ -550,40 +552,6 @@ private fun MirnahContent(
         )
     }
 
-    // Phase 2 — fetch the selected category's items on demand (tens of KB);
-    // they are cached to .txt files, so a category visited once loads instantly
-    // on every later app start.
-    LaunchedEffect(state, selectedTab, kind, vodCat, serCat, liveCat) {
-        val ready = state as? MirnahContentState.Ready ?: return@LaunchedEffect
-        val fresh = forceFresh
-        forceFresh = false
-        val target = when (selectedTab) {
-            0 -> if (kind == 0) vodCat else serCat
-            else -> liveCat
-        } ?: return@LaunchedEffect
-        val cached = when (selectedTab) {
-            0 -> if (kind == 0) ready.movies.containsKey(target) else ready.series.containsKey(target)
-            else -> ready.live.containsKey(target)
-        }
-        if (cached && !fresh) return@LaunchedEffect
-        catLoading = true
-        runCatching {
-            when (selectedTab) {
-                0 -> if (kind == 0) {
-                    val list = xt.vodStreams(target, fresh)
-                    state = ready.copy(movies = ready.movies + (target to list))
-                } else {
-                    val list = xt.series(target, fresh)
-                    state = ready.copy(series = ready.series + (target to list))
-                }
-                else -> {
-                    val list = xt.liveStreams(target, fresh)
-                    state = ready.copy(live = ready.live + (target to list))
-                }
-            }
-        }.onFailure { state = MirnahContentState.Error(friendlyXtreamError(it)) }
-        catLoading = false
-    }
 
     LaunchedEffect(openSeries?.id, episodesRetry) {
         val series = openSeries
@@ -662,10 +630,9 @@ private fun MirnahContent(
                     onRefresh = {
                         openSeries = null
                         episodesRetry = 0
-                        forceFresh = true
                         reloadKey++
                     },
-                    refreshing = state is MirnahContentState.Loading || catLoading,
+                    refreshing = state is MirnahContentState.Loading,
                 )
             }
 
@@ -730,11 +697,17 @@ private fun MirnahContent(
                         }
                     }
                 }
-                state is MirnahContentState.Loading -> item(key = "loading") { MirnahLoadingRow("جاري تحميل الأقسام…") }
+                state is MirnahContentState.Loading -> item(key = "loading") {
+                    val p = bulkProgress.value
+                    MirnahLoadingRow(if (p == null) "جاري تحميل المحتوى…" else {
+                        val mb = "%.1f MB".format(p.bytes / 1e6)
+                        val pct = if (p.total > 0) " · ${(p.bytes * 100 / p.total).toInt().coerceIn(0, 99)}%" else ""
+                        "${p.phase} $mb$pct"
+                    })
+                }
                 state is MirnahContentState.Error -> item(key = "error") {
                     MirnahErrorCard((state as MirnahContentState.Error).message, retryLabel = "إعادة المحاولة") { reloadKey++ }
                 }
-                catLoading -> item(key = "cat_loading") { MirnahLoadingRow("جاري تحميل القسم…") }
                 selectedTab == 0 -> {
                     if (kind == 0) {
                         if (filteredMovies.isEmpty()) item(key = "empty_m") { MirnahEmptyRow("لا يوجد محتوى في هذا القسم") }

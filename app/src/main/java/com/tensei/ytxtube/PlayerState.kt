@@ -144,9 +144,8 @@ class PlayerState(private val scope: CoroutineScope) {
 
         scope.launch {
             snapshotFlow { Triple(StreamRecovery.recovering, StreamRecovery.failed, StreamRecovery.failedEpoch) }
-                .collect { (_, _) ->
+                .collect { (_, failed) ->
                     syncFromPlayer()
-                    val failed = StreamRecovery.failed
                     if (failed != null && failed.first == current?.id) {
                         error = failed.second
                         isBuffering = false
@@ -394,7 +393,9 @@ class PlayerState(private val scope: CoroutineScope) {
     private fun startPlayback(item: VideoItem) {
         val player = controller ?: run { pendingStart = item; return }
 
-        replaceCurrent(player, item, positionMs = ResumeStore.startPosition(item.id))
+        // Live channels always start at the live edge — resuming an old position on
+        // a live TS stream plays stale footage (Blue-Plus never resumes live either).
+        replaceCurrent(player, item, positionMs = if (item.isLive) 0L else ResumeStore.startPosition(item.id))
         player.play()
         if (selectedSubtitleLanguage != null) setSubtitleLanguage(selectedSubtitleLanguage)
         refreshTracks()
@@ -1053,21 +1054,20 @@ class PlayerState(private val scope: CoroutineScope) {
             val status = (e.cause as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)?.responseCode
             Log.w(TAG, "playback error ${e.errorCodeName}${status?.let { " (HTTP $it)" } ?: ""} for ${current?.id}", e)
 
-            if (current?.localUri != null) {
-                // مرناة playback: the service's StreamRecoverer retries automatically —
-                // while it does (recovering == id) keep showing buffering, and only
-                // surface an error once it gives up (or for instantly-fatal failures).
-                if (StreamRecovery.recovering == current?.id) return
+            if (e.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS && StreamRecovery.recovering == current?.id) return
+            // Direct مرناة/Xtream streams: the service-side recoverer owns them. While
+            // it retries keep the buffering pill; its give-up message (Arabic) arrives
+            // through StreamRecovery.failed.
+            if (current?.localUri?.startsWith("http") == true) {
+                if (StreamRecovery.recovering == current?.id || StreamRecovery.failed?.first == current?.id) return
                 error = when (e.errorCode) {
                     PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
-                    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
-                    PlaybackException.ERROR_CODE_TIMEOUT,
-                    -> "انقطع الاتصال بالبث — تحقق من الإنترنت وحاول مجدداً"
-                    else -> "تعذّر تشغيل هذا المحتوى — حاول مجدداً"
+                    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> "انقطع الاتصال بالسيرفر. تحقق من النت وجرّب مرة ثانية."
+                    PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> "السيرفر رفض الطلب. جرّب مرة ثانية بعد شوي."
+                    else -> "تعذّر تشغيل البث من السيرفر."
                 }
                 return
             }
-            if (e.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS && StreamRecovery.recovering == current?.id) return
             error = when (e.errorCode) {
                 PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
                 PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> "Lost the connection. Check your network and try again."

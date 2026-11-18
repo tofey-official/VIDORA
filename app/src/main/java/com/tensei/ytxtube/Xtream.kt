@@ -196,6 +196,15 @@ class XtreamClient(
     /** Cheap API url used only to prewarm DNS+TCP to the IPTV host before playback. */
     fun prewarmUrl(): String = "$base/player_api.php?username=$username&password=$password"
 
+    /** Full player_api url for an action (used by the bulk downloader). */
+    fun apiUrl(action: String): String {
+        val builder = "$base/player_api.php".toHttpUrlOrNull()?.newBuilder() ?: return ""
+        builder.addQueryParameter("username", username)
+        builder.addQueryParameter("password", password)
+        builder.addQueryParameter("action", action)
+        return builder.build().toString()
+    }
+
     /** Live channels on this server are MPEG-TS (m3u8 is rejected with 403). */
     fun liveUrl(streamId: String, extension: String = "ts"): String =
         "$base/live/$username/$password/$streamId.$extension"
